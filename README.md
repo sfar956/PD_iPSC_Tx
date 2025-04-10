@@ -9,5 +9,3 @@ This repository contains scripts used to process multiple different datasets use
 # Off-target analysis (ONT long-read whole genome sequencing [DNA])
 
 # Methylation analysis
-
-# RNAseq analysis (ONT long-read RNAseq)
