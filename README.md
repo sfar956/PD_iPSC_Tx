@@ -11,3 +11,5 @@ Alignment & filtering scripts based on the publicly available pipeline: https://
 # Off-target analysis (ONT long-read whole genome sequencing [DNA])
 
 # Methylation analysis
+
+See previously published pipeline (Nyaga et al): https://github.com/NyagaM/ont-methylDMR-kit.git 
