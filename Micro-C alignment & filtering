@@ -1,0 +1,82 @@
+# Alignment & filtering (fastq to final bam pairs file)
+
+# fastq --> sam files
+REFERENCE="../hg38/hg38.fa"
+THREADS=16
+for fq1 in */*_1.fq.gz; do
+    # Extract the subdirectory name (this will be the sample name)
+    sample_name=$(dirname "$fq1")  # Get the directory name only
+    # Define the second read pair file
+    fq2="${sample_name}/$(basename "$fq1" _1.fq.gz)_2.fq.gz"
+    # Check if the matching _2.fq.gz file exists
+    if [[ -f "$fq2" ]]; then
+        output_sam="${OUTPUT_DIR}/${sample_name}-aligned.sam"  # Use the directory name for output
+        echo "Processing: $fq1 and $fq2 -> $output_sam"
+        bwa mem -5SP -T0 -t"$THREADS" "$REFERENCE" <(zcat "$fq1") <(zcat "$fq2") -o "$output_sam"
+        echo "Finished: $output_sam"
+    else
+        echo "Skipping $fq1 because matching $fq2 was not found."
+    fi
+done
+echo "All alignments completed."
+
+# sam --> pairsam for all aligned files in folder 
+MIN_MAPQ=40
+WALKS_POLICY="5unique"
+MAX_INTER_ALIGN_GAP=30
+NPROC_IN=8
+NPROC_OUT=8
+CHROMS_PATH="/scratch/sophie/Micro-C/hg38/hg38.genome"
+OUTPUT_DIR="/scratch/sophie/Micro-C/iPSC_microC_deep_110325/X204SC24125407-Z01-F001_02/01.RawData/processing_files"
+for samfile in *.sam; do
+    base_name=$(basename "$samfile" .sam)
+    pairsamfile="$OUTPUT_DIR/${base_name}.pairsam"
+    pairtools parse --min-mapq $MIN_MAPQ --walks-policy $WALKS_POLICY \
+        --max-inter-align-gap $MAX_INTER_ALIGN_GAP --nproc-in $NPROC_IN \
+        --nproc-out $NPROC_OUT --chroms-path "$CHROMS_PATH" "$samfile" > "$pairsamfile"
+    echo "Processed $samfile -> $pairsamfile"
+done
+
+# pairsam --> sorted.pairsam for all pairsam files in folder
+NPROC=16
+TMPDIR="/scratch/sophie/temp/"
+for pairsamfile in *.pairsam; do
+> base_name=$(basename "$pairsamfile" .pairsam)
+> sorted_pairsamfile="${base_name}.sorted.pairsam"
+> pairtools sort --nproc $NPROC --tmpdir="$TMPDIR" "$pairsamfile" > "$sorted_pairsamfile"
+> echo "Processed $pairsamfile -> $sorted_pairsamfile"
+> done
+    
+# pairtools dedup to detect molecules formed thgouh PCR duplication (DD)
+for sorted_file in *.sorted.pairsam; do
+> base_name=$(basename "$sorted_file" .sorted.pairsam)
+> dedup_file="${base_name}.dedup.pairsam"
+> stats_file="${base_name}_stats.txt"
+> pairtools dedup --nproc-in $NPROC_IN --nproc-out $NPROC_OUT $MARK_DUPS \
+        --output-stats "$stats_file" --output "$dedup_file" "$sorted_file"
+> echo "Processed $sorted_file -> $dedup_file and $stats_file"
+> done
+
+# pairtools split to split the final pairsam file into a sam and pairs file 
+NPROC_IN=8
+NPROC_OUT=8
+for dedup_file in *.dedup.pairsam; do
+> base_name=$(basename "$dedup_file" .dedup.pairsam)
+> output_pairs="${base_name}.mapped.pairs"
+> output_sam="${base_name}.unsorted.bam"
+> pairtools split --nproc-in $NPROC_IN --nproc-out $NPROC_OUT \
+        --output-pairs "$output_pairs" --output-sam "$output_sam" "$dedup_file"
+> echo "Processed $dedup_file -> $output_pairs and $output_sam"
+> done
+
+# samtools sort to generate final bam file  
+THREADS=16
+TEMP_DIR="/scratch/sophie/temp"
+for unsorted_file in *.unsorted.bam; do
+> base_name=$(basename "$unsorted_file" .unsorted.bam)
+> sorted_file="${base_name}_mapped.PT.bam"
+> samtools sort -@ $THREADS -T "${TEMP_DIR}/${base_name}.temp" -o "$sorted_file" "$unsorted_file"
+> echo "Processed $unsorted_file -> $sorted_file"
+> done
+
+samtools index -M *mapped.PT.bam # Indexing the final bam file
